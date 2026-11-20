@@ -1,0 +1,19 @@
+{
+  "reference_data": "NRTL + Antoine ethanol-water (not experimental)",
+  "units": {
+    "x1": "-",
+    "T": "K",
+    "P": "bar",
+    "y1": "-"
+  },
+  "scaler_type": "standard",
+  "n_train": 342,
+  "n_val": 74,
+  "n_test": 74,
+  "test_mae": 0.005062192018676449,
+  "test_rmse": 0.01631610102001117,
+  "baseline_mae": 0.0621119558662656,
+  "baseline_rmse": 0.11249062932515419,
+  "baseline_fraction_y1_above_1": 0.0,
+  "mae_improvement_factor": 12.269774761034306
+}

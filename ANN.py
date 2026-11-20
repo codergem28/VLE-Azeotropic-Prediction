@@ -44,7 +44,8 @@ def build_model(input_shape, learning_rate=0.001):
     return model
 
 
-def train_model(model, X_train, y_train, X_val, y_val, epochs=200, batch_size=32, patience=20):
+def train_model(model, X_train, y_train, X_val, y_val, epochs=200, batch_size=32, patience=20,
+                checkpoint_path='ANN_BinaryVLE/best_model.weights.h5'):
     """
     Train the ANN model with early stopping and checkpointing.
 
@@ -57,6 +58,9 @@ def train_model(model, X_train, y_train, X_val, y_val, epochs=200, batch_size=32
         epochs (int): Maximum number of training epochs.
         batch_size (int): Number of samples per batch.
         patience (int): Number of epochs to wait for improvement before stopping.
+        checkpoint_path (str): Where to write the best weights (parent directory
+            must exist); passed in explicitly so the pipeline can use an
+            absolute path instead of depending on the working directory.
 
     Returns:
         model (keras.Model): Trained model (with best weights restored).
@@ -75,7 +79,7 @@ def train_model(model, X_train, y_train, X_val, y_val, epochs=200, batch_size=32
         ),
         # ModelCheckpoint: Save the best model weights to disk
         ModelCheckpoint(
-            'ANN_BinaryVLE/best_model.weights.h5',     # Filepath to save the weights
+            checkpoint_path,             # Filepath to save the weights
             monitor='val_loss',
             save_best_only=True,         # Save only the best model (lowest val_loss)
             save_weights_only=True,      # Save weights (not the whole model structure)

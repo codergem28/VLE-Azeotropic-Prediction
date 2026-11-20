@@ -1,199 +1,229 @@
-# Binary VLE ANN Surrogate Model
+# Binary VLE ANN Surrogate Model (ethanol–water)
 
-## What is Vapor-Liquid Equilibrium (VLE)?
+An **Artificial Neural Network surrogate** for the vapour–liquid equilibrium (VLE)
+of ethanol(1)–water(2). Given liquid composition, temperature and pressure it
+returns the ethanol vapour mole fraction `y1` in one forward pass, replacing the
+iterative bubble-point calculation.
 
-Vapor-Liquid Equilibrium (VLE) is a fundamental concept in chemical engineering that describes the relationship between the compositions of liquid and vapor phases when they are in equilibrium at a given temperature and pressure. For binary systems like ethanol-water, this relationship determines how the components distribute between the liquid and vapor phases.
+## Conventions and units
 
-In distillation processes, VLE data is crucial for:
-- Designing distillation columns
-- Optimizing separation processes
-- Predicting product compositions
-- Calculating energy requirements
+| Variable | Meaning | Unit |
+| --- | --- | --- |
+| `x1` | ethanol mole fraction, liquid | – (0–1) |
+| `y1` | ethanol mole fraction, vapour | – (0–1) |
+| `T` | temperature | **K** |
+| `P` | pressure | **bar** |
 
-## What is an Azeotrope?
+`P` is stored and reported in **bar** (1 atm = 1.01325 bar). The original
+isobars were specified as 200, 400, 760, 1000 and 1500 mmHg, which correspond to
+0.26664, 0.53328, 1.01325, 1.33322 and 1.99984 bar.
 
-An **azeotrope** is a special type of VLE behavior where the vapor and liquid compositions become identical at a specific composition. This means that at the azeotropic point, the liquid mole fraction (x1) equals the vapor mole fraction (y1), making it impossible to separate the components further by simple distillation.
+## About the data: a thermodynamic reference set, not measurements
 
-**Key characteristics of azeotropes:**
-- **Minimum-boiling azeotrope**: The mixture boils at a lower temperature than either pure component
-- **Maximum-boiling azeotrope**: The mixture boils at a higher temperature than either pure component
-- **Azeotropic composition**: The specific composition where x1 = y1
+`Data/vle_data.csv` is **generated**, not measured. Every row is a bubble point of
+the NRTL activity-coefficient model (α = 0.3) with Antoine vapour pressures, solved
+in `data.py`:
 
-For ethanol-water systems, there is a minimum-boiling azeotrope at approximately 95.6% ethanol by volume (89.4% by mole), which is why absolute ethanol cannot be obtained by simple distillation.
+```
+x1·γ1(x1,T)·P1sat(T) + x2·γ2(x1,T)·P2sat(T) = P
+y1 = x1·γ1(x1,T)·P1sat(T) / P
+```
 
-## What This Model Does
+Consequences that matter when reading the results:
 
-This project uses an **Artificial Neural Network (ANN)** to create a surrogate model that predicts VLE compositions for ethanol-water systems. Instead of using complex thermodynamic equations (like NRTL or UNIQUAC models), the ANN learns the relationship between:
+- The ANN is a **surrogate for this NRTL model**, not for laboratory data. All
+  errors below are measured against the NRTL reference, so they quantify how well
+  the network reproduces the thermodynamic model inside its training domain.
+  They say nothing about the accuracy of NRTL itself against experiment.
+- The NRTL parameters (`a12 = -0.81`, `b12 = 246`, `a21 = 3.46`, `b21 = -586`) are
+  a literature fit for ethanol–water near atmospheric pressure. The model
+  reproduces the azeotrope at x1 ≈ 0.903 / 78.2 °C (experimental: x1 ≈ 0.894 /
+  78.2 °C); away from 1 atm it is a smooth extrapolation of that fit.
+- Pure-component rows (`x1 = 0`, `x1 = 1`) are solved from the pure saturation
+  condition `Pisat(T) = P` directly — no activity coefficients, and no literature
+  boiling point pinned to the wrong pressure.
+- The generator is **validated**, never clipped (see below): `validate_dataset()`
+  re-solves every row and rejects the dataset if a row fails.
 
-- **Input**: Liquid composition (x1), Temperature (T), Pressure (P)
-- **Output**: Vapor composition (y1)
+### Dataset
 
-**Key advantages:**
-- **Fast predictions**: Instant results vs. iterative thermodynamic calculations
-- **High accuracy**: Achieves <1% error on test data
-- **Easy integration**: Simple API for process simulation software
-- **Azeotrope detection**: Automatically identifies azeotropic behavior
+| | |
+| --- | --- |
+| Rows | 490 (5 isobars × 98 compositions) |
+| `x1` range | 0.000 – 1.000, denser near the azeotrope and near pure ethanol |
+| `T` range | 321.10 – 393.26 K (48.0 – 120.1 °C) |
+| `P` range | 0.26664 – 1.99984 bar |
+| Split | 342 train / 74 validation / 74 test (rows) |
 
-## Model Performance
+The scaler is fitted on the **training split only** and then applied to
+validation/test, so no test statistics leak into training.
 
-Based on the training results from the notebook:
+## Model performance
 
-### Accuracy Metrics
-- **MAE (Mean Absolute Error)**: 0.009789
-- **RMSE (Root Mean Squared Error)**: 0.044143
-- **Model Parameters**: 16,897 trainable parameters
-- **Model Size**: 66 KB
+Measured on the held-out test split, versus the NRTL reference
+(`ANN_BinaryVLE/metrics.json`):
 
-### Azeotrope Detection
-The model successfully detects the ethanol-water azeotrope at:
-- **Azeotropic composition**: x1 = 0.8124 (81.24% ethanol by mole)
-- **Temperature**: 350.98 K (77.83°C)
-- **Pressure**: 1.000 bar
-- **Detection accuracy**: |y1 - x1| < 0.000019
+| Metric | Value |
+| --- | --- |
+| Test MAE | **0.005062** mole fraction |
+| Test RMSE | **0.016316** mole fraction |
+| Ideal-solution baseline MAE | 0.062112 |
+| Improvement over baseline | **12.3×** |
 
-### Baseline Comparison
-- **ANN Model MAE**: 0.009789
-- **Raoult's Law Baseline MAE**: 0.093034
-- **Improvement**: ~9.5x better than simplified baseline
+### Why the baseline is what it is
 
-## Model Architecture
+The baseline is **Raoult's law** (`γi = 1`) evaluated with the *same* Antoine
+correlations, at the *same* `(x1, T, P)` as each test point. It is not a fitted or
+approximate stand-in: the only thing it drops relative to the reference is the
+activity coefficient, i.e. exactly the non-ideality the surrogate has to learn, so
+the MAE gap measures how much non-ideal behaviour the network captured. Reference
+and baseline are computed with the same vapour-pressure correlation, which makes
+the comparison apples-to-apples. (The previous README quoted ~0.093 for an
+*invented* saturation-pressure correlation; that number was not comparable to
+anything and has been replaced.)
+
+## Model architecture
 
 ```
 Input Layer:     3 neurons (x1, T, P)
-Hidden Layer 1:  64 neurons (ReLU activation)
-Hidden Layer 2:  128 neurons (ReLU activation)
-Hidden Layer 3:  64 neurons (ReLU activation)
-Output Layer:    1 neuron (Sigmoid activation for y1 ∈ [0,1])
+Hidden Layer 1:  64 neurons (ReLU)
+Hidden Layer 2: 128 neurons (ReLU)
+Hidden Layer 3:  64 neurons (ReLU)
+Output Layer:    1 neuron (sigmoid -> y1 in [0,1])
 ```
 
-**Training Configuration:**
-- Optimizer: Adam (learning rate = 0.001)
-- Loss Function: Mean Squared Error (MSE)
-- Regularization: Early stopping (patience = 20 epochs)
-- Batch Size: 32 samples
-- Max Epochs: 200
+Training: Adam (lr = 0.001), MSE loss, batch size 32, up to 200 epochs, early
+stopping on validation loss (patience 20), `ModelCheckpoint` on validation loss.
 
-## Visualization Results
+## Visualizations
 
-### VLE Curve (y-x Diagram)
+### VLE isobar at an explicit T and P
 ![VLE Curve](ANN_BinaryVLE/y_vs_x_plot.png)
 
-This plot shows the relationship between liquid composition (x1) and vapor composition (y1) at constant temperature and pressure. The blue line represents ANN predictions, red circles are experimental data, and the red dashed line (y1 = x1) indicates the azeotrope condition. The model accurately captures the azeotropic behavior where the curve approaches the y1 = x1 line.
+Same y–x diagram, but with both coordinates fully specified: `P = 1.01325 bar`
+(760 mmHg) exactly, and for every `x1` the temperature is the NRTL bubble
+temperature at that pressure (351.3 – 373.1 K on this isobar). Green = NRTL
+reference, blue = ANN surrogate, black dots = NRTL test points lying on this
+isobar, red dotted = `y1 = x1`. The intersection with `y1 = x1` is the azeotrope
+at x1 ≈ 0.903, T ≈ 351.3 K.
 
-### Model Performance Validation
+### Parity, residuals and baseline
 ![Parity Plot](ANN_BinaryVLE/parity_plot.png)
+![Residuals](ANN_BinaryVLE/residuals_plot.png)
+![Baseline parity](ANN_BinaryVLE/baseline_parity_plot.png)
 
-The parity plot compares experimental vs predicted y1 values. Points close to the diagonal red line indicate accurate predictions. The model shows excellent agreement with experimental data, with most points clustered tightly around the perfect prediction line.
+## Setup
 
-## Setup Instructions
-
-### Option 1: Using pip with requirements.txt
-
+### pip
 ```bash
-# Clone the repository
 git clone <repository-url>
-cd vle3
-
-# Create virtual environment
+cd VLE-Azeotropic-Prediction
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Option 2: Using uv (recommended)
-
+### uv (recommended)
 ```bash
-# Clone the repository 
-git clone <repository-url> 
-cd vle3 
-
-# Install uv (macOS/Linux) if not available 
-curl -LsSf https://astral.sh/uv/install.sh | sh 
-
-# Create & activate virtual environment 
-uv venv .venv 
-source .venv/bin/activate  # on Windows: .venv\Scripts\activate 
-
-# Install dependencies strictly from uv.lock 
-uv sync --frozen 
-
-# To update the lockfile later
-# uv lock --upgrade && uv sync 
+uv venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+uv sync --frozen
 ```
 
 ## Usage
 
-### Quick Start
 ```bash
-# Run complete training pipeline
-python preprocessing_training_saving.py
-
-# Make predictions with saved model
-python predict_from_saved_model.py
-
-# Interactive analysis
-jupyter notebook test.ipynb
+python data.py                            # (optional) regenerate + validate Data/vle_data.csv
+python preprocessing_training_saving.py   # train, evaluate, write ANN_BinaryVLE/ and the zip
+python predict_from_saved_model.py        # reload artifacts, recreate plots
+jupyter notebook test.ipynb               # the notebook only calls the modules above
 ```
 
-### Programmatic Usage
+`predict_from_saved()` warns when an input lies outside the training domain and
+raises on `x1` outside [0, 1]:
+
 ```python
 import numpy as np
 from predict_from_saved_model import predict_from_saved
 
-# Predict vapor composition for x1=0.5, T=350K, P=1.0 bar
-X_new = np.array([[0.5, 350.0, 1.0]])
-y_pred = predict_from_saved(X_new)
-print(f"Predicted y1: {y_pred[0]:.4f}")
+X_new = np.array([[0.5, 350.0, 1.01325]])   # x1, T [K], P [bar]
+print(predict_from_saved(X_new)[0])         # -> vapour y1
 ```
 
-## Project Structure
+## Data validation (instead of clipping)
+
+`data.py` raises instead of returning a plausible-looking wrong number, and
+`validate_dataset()` enforces, over the whole dataset:
+
+- all values finite, `0 ≤ x1 ≤ 1`, `0 ≤ y1 ≤ 1`, `T > 0`, `P > 0`;
+- each isobar has **at most one** composition sign change in `y1 - x1`
+  (ethanol–water admits exactly one azeotrope);
+- pure-component rows match the pure saturation temperature at their pressure
+  (within 0.05 K) and have `y1 = x1` exactly;
+- every row reproduces its own pressure from the bubble-point equation
+  (within 1e-4 bar) and its own `y1` (within 2e-4).
+
+Training runs the same validation on the loaded CSV, so an unphysical dataset
+cannot be trained on silently.
+
+## Project structure
 
 ```
-vle3/
-├── ANN.py                           # Core ANN model definition
-├── data.py                          # NRTL data generation
-├── preprocessing_training_saving.py # Main training pipeline
-├── predict_from_saved_model.py      # Prediction utilities
-├── test.ipynb                       # Interactive analysis notebook
-├── Data/vle_data.csv                # Training dataset (500 points)
-├── requirements.txt                 # Dependencies for pip
-├── pyproject.toml                   # Dependencies for uv
-└── ANN_BinaryVLE/                   # Pre-trained model package
-    ├── ann_vle_model.h5            # Trained model
-    ├── preprocessing_pipeline.pkl   # Data scalers
-    ├── best_model.weights.h5       # Best weights
-    ├── parity_plot.png             # Performance validation
-    ├── y_vs_x_plot.png             # VLE curve visualization
-    ├── residuals_plot.png          # Error analysis
-    ├── training_history.png        # Training progress
-    └── baseline_parity_plot.png    # Baseline comparison
+VLE-Azeotropic-Prediction/
+├── ANN.py                            # model definition + training loop
+├── data.py                           # NRTL generator, bubble point, validation
+├── preprocessing_training_saving.py  # split -> fit scaler (train only) -> train -> evaluate
+├── predict_from_saved_model.py       # inference + plot recreation
+├── test.ipynb                        # thin notebook wrapper around the modules
+├── Data/vle_data.csv                 # NRTL reference dataset (490 rows)
+├── requirements.txt
+├── pyproject.toml
+└── ANN_BinaryVLE/                    # generated by the training script
+    ├── ann_vle_model.h5              # trained model
+    ├── best_model.weights.h5         # best-validation checkpoint
+    ├── preprocessing_pipeline.pkl    # train-fitted scaler + feature ranges + units
+    ├── metrics.json                  # test/baseline metrics + reference-data note
+    ├── parity_plot.png
+    ├── residuals_plot.png
+    ├── y_vs_x_plot.png
+    ├── training_history.png
+    └── baseline_parity_plot.png
 ```
 
-## Dataset
+`ANN_BinaryVLE.zip` (project root) bundles the model, pipeline, metrics and plots
+for distribution.
 
-The model is trained on 500 VLE data points generated using the NRTL thermodynamic model:
+## Deployment notes
 
-- **Composition Range**: x1 = 0.000 - 1.000 (ethanol mole fraction)
-- **Temperature Range**: T = 323.2 - 386.6 K (50-113°C)
-- **Pressure Range**: P = 0.263 - 1.974 bar (0.26-1.95 atm)
-- **Data Split**: 70% training, 15% validation, 15% test
+The artifacts in `ANN_BinaryVLE/` are self-contained and versioned with the code:
+
+- `preprocessing_pipeline.pkl` stores the scaler, the feature/target order
+  (`['x1','T','P']` → `['y1']`), the unit map and `feature_ranges` (min/max seen
+  in training). Load it before any prediction; it defines the input contract.
+- `metrics.json` carries the reference-data disclaimer and units next to the
+  scores, so a consumer cannot mistake the numbers for experimental accuracy.
+- `predict_from_saved()` is the supported entry point (inference only, no training
+  import). It loads the model with `compile=False`, validates the column count and
+  `x1` bounds, and warns on extrapolation.
+- Domain of validity: `x1 ∈ [0, 1]`, `T ∈ [321.1, 393.3] K`,
+  `P ∈ [0.267, 2.000] bar`. Predictions outside that box are extrapolation.
+- Re-running the training script regenerates `Data/vle_data.csv`, the model, the
+  pipeline, the metrics and the zip, so code and artifacts cannot drift apart.
+  Seeds are fixed (`keras.utils.set_random_seed(42)` plus deterministic TensorFlow
+  kernels), so the shipped metrics reproduce on a rerun.
+
+## Known limitation
+
+The test split is a random sample of rows, so test points are interpolated
+between neighbouring training points on the `(P, x1)` grid. The reported
+MAE/RMSE is therefore an interpolation error. For an extrapolation estimate,
+split by isobar (pressure group) instead of by row.
 
 ## Requirements
 
-- Python 3.11+
-- TensorFlow 2.20+
-- scikit-learn, pandas, numpy, matplotlib, seaborn, scipy, joblib, jupyter
-
-## Applications
-
-- **Distillation Column Design**: Optimize tray efficiency and reflux ratios
-- **Process Simulation**: Fast VLE calculations in Aspen Plus/HYSYS
-- **Real-time Control**: Online composition monitoring
-- **Process Optimization**: Minimize energy consumption
-- **Quality Control**: Ensure product specifications
+Python 3.11+, TensorFlow 2.20+, scikit-learn, pandas, numpy, scipy, matplotlib,
+seaborn, joblib (see `requirements.txt` / `pyproject.toml`).
 
 ## License
 
-This project is licensed under the MIT License.
+MIT — see `LICENSE`.
