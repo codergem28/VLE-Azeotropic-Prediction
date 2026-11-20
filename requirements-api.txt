@@ -1,11 +1,9 @@
-# Runtime dependency for the HTTP service in serve.py.
-# TensorFlow ships CPU wheels as the plain "tensorflow" package from 2.16 on.
+# Runtime dependencies for the HTTP service in serve.py.
+# The service runs the exported ONNX graph with numpy-only scaling, so neither
+# TensorFlow nor scikit-learn is needed in the image (that is the difference
+# between a ~3.4 GB image and a ~250 MB one).
 fastapi>=0.115
 uvicorn[standard]>=0.34
 pydantic>=2.9
-tensorflow>=2.20.0
-scikit-learn>=1.7.2
-joblib>=1.5.2
+onnxruntime>=1.20
 numpy>=2.3.3
-pandas>=2.3.2
-scipy>=1.16.2

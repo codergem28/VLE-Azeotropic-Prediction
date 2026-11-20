@@ -1,0 +1,67 @@
+{
+  "feature_names": [
+    "x1",
+    "T",
+    "P"
+  ],
+  "target_name": "y1",
+  "units": {
+    "x1": "-",
+    "T": "K",
+    "P": "bar",
+    "y1": "-"
+  },
+  "feature_ranges": {
+    "x1": [
+      0.0,
+      1.0
+    ],
+    "T": [
+      321.09576,
+      393.25876
+    ],
+    "P": [
+      0.26664,
+      1.99984
+    ]
+  },
+  "scaler": {
+    "type": "StandardScaler",
+    "mean": [
+      0.7022200877192982,
+      348.37554485380093,
+      1.0007745029239785
+    ],
+    "scale": [
+      0.2820641188412867,
+      16.92721818364694,
+      0.5814180256553089
+    ]
+  },
+  "reference_data": "NRTL + Antoine (ethanol-water); not experimental",
+  "model_file": "ann_vle_model.onnx",
+  "metrics": {
+    "reference_data": "NRTL + Antoine ethanol-water (not experimental)",
+    "units": {
+      "x1": "-",
+      "T": "K",
+      "P": "bar",
+      "y1": "-"
+    },
+    "scaler_type": "standard",
+    "n_train": 342,
+    "n_val": 74,
+    "n_test": 74,
+    "test_mae": 0.005062192018676449,
+    "test_rmse": 0.01631610102001117,
+    "baseline_mae": 0.0621119558662656,
+    "baseline_rmse": 0.11249062932515419,
+    "baseline_fraction_y1_above_1": 0.0,
+    "mae_improvement_factor": 12.269774761034306
+  },
+  "verification": {
+    "rows": 490,
+    "max_abs_diff_vs_keras": 1.1920928955078125e-07,
+    "tolerance": 1e-05
+  }
+}

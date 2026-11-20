@@ -1,0 +1,20 @@
+# Render Blueprint: deploy the published surrogate image as a free web service.
+#
+#   render blueprint launch      (CLI, after `render login`)
+#   or Dashboard -> New -> Blueprint -> point at this repository
+#
+# The image is public, so Render needs no registry credentials. Render injects
+# PORT; uvicorn is bound to 8000 in the image and Render routes to $PORT, so the
+# start command passes PORT through explicitly when it differs.
+services:
+  - type: web
+    name: vle-surrogate
+    runtime: image
+    plan: free
+    region: oregon
+    image:
+      url: docker.io/codergem28/vle-surrogate:1.1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"

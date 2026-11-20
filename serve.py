@@ -4,40 +4,43 @@ Run locally:
     uvicorn serve:app --reload --port 8000
 
 Contract: every prediction takes rows of [x1, T(K), P(bar)] and returns y1 in
-[-]. The model is a surrogate for the NRTL reference data in data.py, not for
-experimental measurements -- /metadata reports that next to the scores so a
-caller cannot mistake one for the other.
+[-]. The model is ONNX Runtime executing the trained Keras network; scaling is
+reproduced from `model_contract.json`, so no TensorFlow, scikit-learn or pandas
+is needed at runtime. The model is a surrogate for the NRTL reference data in
+data.py, not for experimental measurements -- /metadata reports that next to the
+scores so a caller cannot mistake one for the other.
 """
 
 import json
-import warnings
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import joblib
 import numpy as np
+import onnxruntime as ort
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from tensorflow import keras
-
-from data import FEATURES
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / 'ANN_BinaryVLE'
-MODEL_PATH = OUTPUT_DIR / 'ann_vle_model.h5'
-PIPELINE_PATH = OUTPUT_DIR / 'preprocessing_pipeline.pkl'
-METRICS_PATH = OUTPUT_DIR / 'metrics.json'
+MODEL_PATH = OUTPUT_DIR / 'ann_vle_model.onnx'
+CONTRACT_PATH = OUTPUT_DIR / 'model_contract.json'
 
 STATE = {}
 
 
 @asynccontextmanager
 async def lifespan(app):
-    for path in (MODEL_PATH, PIPELINE_PATH):
+    for path in (MODEL_PATH, CONTRACT_PATH):
         if not path.exists():
-            raise RuntimeError(f'{path} not found: run preprocessing_training_saving.py first')
-    STATE['model'] = keras.models.load_model(str(MODEL_PATH), compile=False)
-    STATE['pipeline'] = joblib.load(PIPELINE_PATH)
+            raise RuntimeError(f'{path} not found: run export_onnx.py first')
+
+    contract = json.loads(CONTRACT_PATH.read_text(encoding='utf-8'))
+    STATE['contract'] = contract
+    STATE['session'] = ort.InferenceSession(str(MODEL_PATH),
+                                           providers=['CPUExecutionProvider'])
+    STATE['input_name'] = STATE['session'].get_inputs()[0].name
+    STATE['mean'] = np.asarray(contract['scaler']['mean'], dtype=np.float64)
+    STATE['scale'] = np.asarray(contract['scaler']['scale'], dtype=np.float64)
     yield
     STATE.clear()
 
@@ -49,7 +52,7 @@ app = FastAPI(
         'temperature T [K] and pressure P [bar]. Trained on NRTL reference data, '
         'not on experimental measurements.'
     ),
-    version='1.0.0',
+    version='1.1.0',
     lifespan=lifespan,
 )
 
@@ -74,13 +77,15 @@ class PredictResponse(BaseModel):
 
 
 def _predict(rows: np.ndarray) -> tuple[np.ndarray, list[str]]:
-    pipeline = STATE['pipeline']
+    contract = STATE['contract']
+    feature_names = contract['feature_names']
     messages = []
 
-    if rows.ndim != 2 or rows.shape[1] != len(FEATURES):
+    if rows.ndim != 2 or rows.shape[1] != len(feature_names):
         raise HTTPException(
             status_code=422,
-            detail=f'expected N rows of {len(FEATURES)} values {FEATURES}, got shape {rows.shape}',
+            detail=f'expected N rows of {len(feature_names)} values {feature_names}, '
+                   f'got shape {rows.shape}',
         )
     if not np.all(np.isfinite(rows)):
         raise HTTPException(status_code=422, detail='inputs must be finite numbers')
@@ -89,8 +94,8 @@ def _predict(rows: np.ndarray) -> tuple[np.ndarray, list[str]]:
     if (rows[:, 1] <= 0).any() or (rows[:, 2] <= 0).any():
         raise HTTPException(status_code=422, detail='T [K] and P [bar] must be positive')
 
-    for name, (lo, hi) in pipeline.get('feature_ranges', {}).items():
-        i = pipeline['feature_names'].index(name)
+    for name, (lo, hi) in contract['feature_ranges'].items():
+        i = feature_names.index(name)
         outside = (rows[:, i] < lo) | (rows[:, i] > hi)
         if outside.any():
             messages.append(
@@ -98,11 +103,8 @@ def _predict(rows: np.ndarray) -> tuple[np.ndarray, list[str]]:
                 f'[{lo:.5f}, {hi:.5f}]: prediction is extrapolation'
             )
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter('always')
-        y = STATE['model'].predict(pipeline['scaler'].transform(rows), verbose=0).flatten()
-    messages.extend(str(w.message) for w in caught)
-
+    scaled = ((rows - STATE['mean']) / STATE['scale']).astype(np.float32)
+    y = STATE['session'].run(None, {STATE['input_name']: scaled})[0].flatten()
     return np.clip(y, 0.0, 1.0), messages
 
 
@@ -111,25 +113,26 @@ def health():
     return {
         'status': 'ok',
         'model': MODEL_PATH.name,
-        'reference_data': STATE['pipeline'].get('reference_data'),
+        'runtime': f'onnxruntime {ort.__version__}',
+        'reference_data': STATE['contract'].get('reference_data'),
     }
 
 
 @app.get('/metadata')
 def metadata():
-    body = {
-        'feature_names': STATE['pipeline'].get('feature_names'),
-        'target_name': STATE['pipeline'].get('target_name'),
-        'units': STATE['pipeline'].get('units'),
-        'feature_ranges': STATE['pipeline'].get('feature_ranges'),
-        'reference_data': STATE['pipeline'].get('reference_data'),
+    contract = STATE['contract']
+    return {
+        'feature_names': contract['feature_names'],
+        'target_name': contract['target_name'],
+        'units': contract['units'],
+        'feature_ranges': contract['feature_ranges'],
+        'reference_data': contract['reference_data'],
+        'metrics': contract.get('metrics'),
+        'export_verification': contract.get('verification'),
     }
-    if METRICS_PATH.exists():
-        body['metrics'] = json.loads(METRICS_PATH.read_text(encoding='utf-8'))
-    return body
 
 
 @app.post('/predict', response_model=PredictResponse)
 def predict(request: PredictRequest):
-    y, messages = _predict(np.asarray(request.inputs, dtype=float))
+    y, messages = _predict(np.asarray(request.inputs, dtype=np.float64))
     return PredictResponse(predictions=[float(v) for v in y], warnings=messages)
