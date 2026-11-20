@@ -193,6 +193,42 @@ VLE-Azeotropic-Prediction/
 `ANN_BinaryVLE.zip` (project root) bundles the model, pipeline, metrics and plots
 for distribution.
 
+## Serving the model (HTTP API)
+
+`serve.py` wraps the saved artifacts in a FastAPI app. It loads the model and the
+scikit-learn scaler once at startup and exposes:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | liveness + reference-data disclaimer |
+| `GET /metadata` | feature order, units, training ranges, `metrics.json` |
+| `POST /predict` | `{"inputs": [[x1, T, P], ...]}` → `{"predictions": [...], "warnings": [...]}` |
+
+```bash
+pip install -r requirements-api.txt
+uvicorn serve:app --host 0.0.0.0 --port 8000
+
+curl -X POST localhost:8000/predict -H 'Content-Type: application/json' \
+     -d '{"inputs": [[0.5, 350.0, 1.01325]]}'
+# {"predictions":[0.7205207347869873],"warnings":[]}
+```
+
+`x1` outside [0, 1], non-finite values or a wrong number of columns return HTTP
+422; an input outside the trained `T`/`P`/`x1` ranges still returns a prediction
+but lists an extrapolation warning.
+
+### Docker
+
+```bash
+docker build -t vle-surrogate:1.0 .
+docker run -d --name vle-api -p 8000:8000 vle-surrogate:1.0
+docker logs vle-api          # uvicorn startup
+curl localhost:8000/health   # {"status":"ok",...}
+```
+
+The image contains only the API runtime (no matplotlib, seaborn or notebook) plus
+the two model artifacts; it has a `HEALTHCHECK` on `/health` and listens on 8000.
+
 ## Deployment notes
 
 The artifacts in `ANN_BinaryVLE/` are self-contained and versioned with the code:

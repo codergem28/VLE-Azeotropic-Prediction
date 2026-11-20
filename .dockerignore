@@ -1,0 +1,14 @@
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+*.ipynb
+.ipynb_checkpoints/
+.venv/
+venv/
+Data/
+ANN_BinaryVLE.zip
+ANN_BinaryVLE/*.png
+ANN_BinaryVLE/*recreated*.png
+*.log
+uv.lock
