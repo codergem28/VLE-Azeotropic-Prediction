@@ -220,11 +220,18 @@ but lists an extrapolation warning.
 ### Docker
 
 ```bash
+# Prebuilt, public image (no build needed)
+docker run -d --name vle-api -p 8000:8000 codergem28/vle-surrogate:1.0
+
+# Or build it locally
 docker build -t vle-surrogate:1.0 .
 docker run -d --name vle-api -p 8000:8000 vle-surrogate:1.0
+
 docker logs vle-api          # uvicorn startup
 curl localhost:8000/health   # {"status":"ok",...}
 ```
+
+Published at <https://hub.docker.com/r/codergem28/vle-surrogate> (public).
 
 The image contains only the API runtime (no matplotlib, seaborn or notebook) plus
 the two model artifacts; it has a `HEALTHCHECK` on `/health` and listens on 8000.
