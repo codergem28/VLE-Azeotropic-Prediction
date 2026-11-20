@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -52,7 +53,7 @@ app = FastAPI(
         'temperature T [K] and pressure P [bar]. Trained on NRTL reference data, '
         'not on experimental measurements.'
     ),
-    version='1.1.0',
+    version='1.2.0',
     lifespan=lifespan,
 )
 
@@ -106,6 +107,12 @@ def _predict(rows: np.ndarray) -> tuple[np.ndarray, list[str]]:
     scaled = ((rows - STATE['mean']) / STATE['scale']).astype(np.float32)
     y = STATE['session'].run(None, {STATE['input_name']: scaled})[0].flatten()
     return np.clip(y, 0.0, 1.0), messages
+
+
+@app.get('/', include_in_schema=False)
+def root():
+    """Send the bare hostname somewhere useful instead of a 404."""
+    return RedirectResponse(url='/docs')
 
 
 @app.get('/health')

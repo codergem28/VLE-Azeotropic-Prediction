@@ -200,6 +200,7 @@ and the model contract once at startup and exposes:
 
 | Endpoint | Purpose |
 | --- | --- |
+| `GET /` | redirects to `/docs` |
 | `GET /health` | liveness + reference-data disclaimer |
 | `GET /metadata` | feature order, units, training ranges, `metrics.json` |
 | `POST /predict` | `{"inputs": [[x1, T, P], ...]}` → `{"predictions": [...], "warnings": [...]}` |
@@ -220,12 +221,12 @@ but lists an extrapolation warning.
 ### Docker
 
 ```bash
-# Prebuilt, public image (no build needed) — 455 MB
-docker run -d --name vle-api -p 8000:8000 codergem28/vle-surrogate:1.1
+# Prebuilt, public image (no build needed) — 110 MB compressed
+docker run -d --name vle-api -p 8000:8000 codergem28/vle-surrogate:1.2
 
 # Or build it locally
-docker build -t vle-surrogate:1.1 .
-docker run -d --name vle-api -p 8000:8000 vle-surrogate:1.1
+docker build -t vle-surrogate:1.2 .
+docker run -d --name vle-api -p 8000:8000 vle-surrogate:1.2
 
 docker logs vle-api          # uvicorn startup
 curl localhost:8000/health   # {"status":"ok",...}
@@ -234,7 +235,8 @@ curl localhost:8000/health   # {"status":"ok",...}
 Published at <https://hub.docker.com/r/codergem28/vle-surrogate> (public).
 
 The service runs the network through ONNX Runtime, so the image carries no
-TensorFlow, scikit-learn, pandas or matplotlib — 455 MB instead of 3.49 GB, and
+TensorFlow, scikit-learn, pandas or matplotlib — 455 MB on disk (110 MB
+compressed) instead of 3.49 GB, and
 about 8 s to healthy instead of 40. It holds the ONNX graph (68 KB) and
 `model_contract.json` (units, trained ranges, scaler mean/scale, metrics),
 `HEALTHCHECK`s `/health` and listens on 8000.
@@ -243,17 +245,35 @@ about 8 s to healthy instead of 40. It holds the ONNX graph (68 KB) and
 write the contract if the ONNX output differs from Keras by more than `1e-5`
 (currently `1.2e-07` over the whole dataset). Rerun it after retraining.
 
-### Render
+### Live endpoint
 
-`render.yaml` is a Blueprint that runs the public image as a free web service
-(512 MB RAM, sleeps after 15 idle minutes, `/health` as the health check path):
+The surrogate is deployed as a free Render web service:
+
+- API + interactive docs: <https://vle-surrogate-1-1.onrender.com/docs>
+- Health: <https://vle-surrogate-1-1.onrender.com/health>
+
+```bash
+curl -X POST https://vle-surrogate-1-1.onrender.com/predict \
+     -H 'Content-Type: application/json' \
+     -d '{"inputs": [[0.5, 350.0, 1.01325]]}'
+# {"predictions":[0.7205207347869873],"warnings":[]}
+```
+
+Free instances sleep after 15 idle minutes; the first request after that takes
+about 50 s to wake. To redeploy after pushing a new image tag, use
+**Manual Deploy → Deploy latest image** in the Render dashboard (a registry tag
+`docker.io/codergem28/vle-surrogate:latest` is mapped to the same build as `1.2`).
+
+`render.yaml` is a Blueprint that runs the same public image as a free web
+service (512 MB RAM, sleeps after 15 idle minutes, `/health` as the health check
+path):
 
 ```bash
 render blueprint launch          # after `render login`
 ```
 
 Or in the dashboard: **New → Web Service → Existing Image**, image
-`docker.io/codergem28/vle-surrogate:1.1`, plan **Free**, health check `/health`.
+`docker.io/codergem28/vle-surrogate:1.2`, plan **Free**, health check `/health`.
 
 ## Deployment notes
 

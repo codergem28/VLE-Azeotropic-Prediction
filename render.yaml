@@ -13,7 +13,7 @@ services:
     plan: free
     region: oregon
     image:
-      url: docker.io/codergem28/vle-surrogate:1.1
+      url: docker.io/codergem28/vle-surrogate:1.2
     healthCheckPath: /health
     envVars:
       - key: PYTHONUNBUFFERED
